@@ -40,7 +40,7 @@ func Run(ctx context.Context, env config.Env, logger *slog.Logger) error {
 	fileServer := filesystem.NewServer(root, statCache)
 	handler := server.NewHandler(resolver, fileServer, logger)
 
-	reloader := watcher.NewReloader(root, routeCache, statCache, logger)
+	reloader := watcher.NewReloader(root, routeCache, statCache, logger, env.WatchPollInterval)
 	if err := reloader.Start(ctx); err != nil {
 		logger.Warn("file watcher unavailable", "error", err)
 	}

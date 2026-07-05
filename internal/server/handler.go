@@ -57,12 +57,18 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			http.NotFound(w, r)
 		}
 	case router.KindListing:
+		if w.Header().Get("Cache-Control") == "" {
+			w.Header().Set("Cache-Control", "no-cache, must-revalidate")
+		}
 		if err := listing.Write(w, decision.ListingDir, decision.URLPath); err != nil {
 			h.Logger.Warn("listing failed", "path", decision.ListingDir, "error", err)
 			http.NotFound(w, r)
 		}
 	case router.KindReadme:
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		if w.Header().Get("Cache-Control") == "" {
+			w.Header().Set("Cache-Control", "no-cache, must-revalidate")
+		}
 		if r.Method == http.MethodHead {
 			w.WriteHeader(http.StatusOK)
 			return

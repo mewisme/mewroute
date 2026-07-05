@@ -101,6 +101,10 @@ func ServeFile(w http.ResponseWriter, r *http.Request, absPath string, download 
 		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", name))
 	}
 
+	if w.Header().Get("Cache-Control") == "" {
+		w.Header().Set("Cache-Control", "no-cache, must-revalidate")
+	}
+
 	etag := fmt.Sprintf(`"%x-%x"`, st.ModTime().Unix(), st.Size())
 	w.Header().Set("ETag", etag)
 

@@ -8,19 +8,21 @@ import (
 )
 
 type Env struct {
-	RootDir      string
-	Port         int
-	LogLevel     string
-	ReadTimeout  time.Duration
-	WriteTimeout time.Duration
+	RootDir          string
+	Port             int
+	LogLevel         string
+	ReadTimeout      time.Duration
+	WriteTimeout     time.Duration
+	WatchPollInterval time.Duration
 }
 
 func LoadEnv() (Env, error) {
 	e := Env{
-		RootDir:      getenv("ROOT_DIR", "/data"),
-		LogLevel:     getenv("LOG_LEVEL", "info"),
-		ReadTimeout:  durationEnv("READ_TIMEOUT", 30*time.Second),
-		WriteTimeout: durationEnv("WRITE_TIMEOUT", 60*time.Second),
+		RootDir:           getenv("ROOT_DIR", "/data"),
+		LogLevel:          getenv("LOG_LEVEL", "info"),
+		ReadTimeout:       durationEnv("READ_TIMEOUT", 30*time.Second),
+		WriteTimeout:      durationEnv("WRITE_TIMEOUT", 60*time.Second),
+		WatchPollInterval: durationEnv("WATCH_POLL_INTERVAL", 5*time.Second),
 	}
 
 	portStr := getenv("PORT", "8080")

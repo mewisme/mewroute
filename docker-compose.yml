@@ -5,8 +5,10 @@ services:
     ports:
       - "8080:8080"
     volumes:
+      # :ro = container cannot write (security). You can still edit ./data on the host.
       - ./data:/data:ro
     environment:
       ROOT_DIR: /data
       LOG_LEVEL: info
+      WATCH_POLL_INTERVAL: 5s
     restart: unless-stopped

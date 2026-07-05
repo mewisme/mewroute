@@ -243,6 +243,7 @@ If a directory contains `readme.md` (any casing, e.g. `README.md`, `readme.MD`),
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
 | `READ_TIMEOUT` | `30s` | Server read timeout |
 | `WRITE_TIMEOUT` | `60s` | Server write timeout |
+| `WATCH_POLL_INTERVAL` | `5s` | Rescan `ROOT_DIR` for new folders and refresh caches (`0` disables polling) |
 
 ## Security
 
@@ -278,6 +279,24 @@ Caches:
 - **Route cache** — atomic snapshot of all `.routes.yml` rules
 - **Stat cache** — file metadata, invalidated on filesystem changes
 - **Config reload** — debounced via `fsnotify` (no restart required)
+- **Live content updates** — edit files under `data/` on the host while mewroute is running; changes are picked up automatically (new folders are detected every `WATCH_POLL_INTERVAL`)
+
+## Troubleshooting
+
+### `Permission denied` when creating files in `data/` on the host
+
+The `:ro` flag in `docker-compose.yml` only makes the mount **read-only inside the container**. It does **not** block you from editing `./data` on the server.
+
+If `mkdir` or `cp` fails on the host, the directory is usually owned by `root` because Docker was run with `sudo`:
+
+```bash
+ls -la ~/docker/mewroute/data
+sudo chown -R "$USER:$USER" ~/docker/mewroute/data
+chmod -R u+rwx ~/docker/mewroute/data
+mkdir ~/docker/mewroute/data/wrec
+```
+
+Avoid `sudo docker compose` for day-to-day use so new files stay owned by your user. mewroute only needs read access inside the container.
 
 ## Development
 
