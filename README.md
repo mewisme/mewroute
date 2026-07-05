@@ -55,6 +55,14 @@ docker build -t mewroute .
 docker run --rm -p 8080:8080 -v "$(pwd)/data:/data:ro" mewroute
 ```
 
+Published images (`ghcr.io/mewisme/mewroute`) are **multi-arch manifests** (`linux/amd64`, `linux/arm64`). Tags like `latest`, `1.0.0`, or `v1.0.0` auto-select the correct architecture on pull.
+
+Releases are published by pushing a semver tag (`v1.0.0`) or running the [Docker publish workflow](.github/workflows/docker-publish.yml) manually.
+
+```bash
+docker pull ghcr.io/mewisme/mewroute:latest
+```
+
 ### Binary
 
 Requires **Go 1.26+** to build:
