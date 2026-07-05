@@ -1,0 +1,12 @@
+.git
+.github
+data
+testdata
+*.md
+LICENSE
+CONTRIBUTING.md
+CHANGELOG.md
+mewroute
+mewroute.exe
+.cursor
+*.plan.md

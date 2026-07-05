@@ -1,0 +1,24 @@
+routes:
+  - from: /hello
+    to: ./hello.ps1
+    type: rewrite
+  - from: /download
+    to: ./hello.ps1
+    type: file
+    download: true
+  - from: /old
+    to: /scripts/hello
+    type: redirect
+    status: 302
+  - from: /external
+    to: https://example.com/docs
+    type: redirect
+    status: 301
+  - from: /docs/*
+    to: ./hello.ps1
+    type: file
+
+listing: true
+
+headers:
+  X-Test-Scope: scripts

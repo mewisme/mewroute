@@ -1,0 +1,8 @@
+/mewroute
+/mewroute.exe
+*.exe
+*.test
+coverage.out
+.idea/
+.vscode/
+.cursor/

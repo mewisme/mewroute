@@ -1,0 +1,7 @@
+dist:
+  path: ./build
+  fallback: index.html
+
+headers:
+  Cache-Control: no-store
+  X-App: demo

@@ -1,0 +1,6 @@
+listing: false
+
+routes:
+  - from: /secret
+    to: ./nested.txt
+    type: file

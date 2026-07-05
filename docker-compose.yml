@@ -1,0 +1,12 @@
+services:
+  mewroute:
+    build: .
+    image: ghcr.io/mewisme/mewroute:latest
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data:/data:ro
+    environment:
+      ROOT_DIR: /data
+      LOG_LEVEL: info
+    restart: unless-stopped

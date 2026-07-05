@@ -1,0 +1,15 @@
+routes:
+  - from: /hello
+    to: ./hello.ps1
+    type: rewrite
+  - from: /download
+    to: ./hello.ps1
+    type: file
+    download: true
+  - from: /old
+    to: /scripts/hello
+    type: redirect
+    status: 302
+
+headers:
+  X-App: scripts
