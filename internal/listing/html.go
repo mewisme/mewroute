@@ -26,7 +26,8 @@ func Write(w http.ResponseWriter, dirPath string, urlPath string) error {
 	}
 	var items []item
 	for _, e := range entries {
-		if e.Name() == ".routes.yml" || e.Name() == ".routes.yaml" {
+		if e.Name() == ".routes.yml" || e.Name() == ".routes.yaml" ||
+			e.Name() == ".config.yml" || e.Name() == ".config.yaml" {
 			continue
 		}
 		info, err := e.Info()

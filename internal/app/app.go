@@ -34,7 +34,11 @@ func Run(ctx context.Context, env config.Env, logger *slog.Logger) error {
 	if err != nil {
 		return fmt.Errorf("load routes: %w", err)
 	}
-	routeCache.Store(table)
+	global, err := config.LoadGlobalConfig(root)
+	if err != nil {
+		return fmt.Errorf("load global config: %w", err)
+	}
+	routeCache.Store(table, global)
 
 	resolver := router.NewResolver(root, routeCache)
 	fileServer := filesystem.NewServer(root, statCache)

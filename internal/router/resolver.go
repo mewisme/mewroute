@@ -61,22 +61,33 @@ type Table struct {
 	byPrefix map[string]*config.ScopedConfig
 }
 
+type Snapshot struct {
+	Table  *Table
+	Global *config.GlobalConfig
+}
+
 type Cache struct {
-	v atomic.Value // *Table
+	v atomic.Value // *Snapshot
 }
 
 func NewCache() *Cache {
 	c := &Cache{}
-	c.v.Store(&Table{byPrefix: map[string]*config.ScopedConfig{}})
+	c.v.Store(&Snapshot{
+		Table:  &Table{byPrefix: map[string]*config.ScopedConfig{}},
+		Global: &config.GlobalConfig{},
+	})
 	return c
 }
 
-func (c *Cache) Get() *Table {
-	return c.v.Load().(*Table)
+func (c *Cache) Get() *Snapshot {
+	return c.v.Load().(*Snapshot)
 }
 
-func (c *Cache) Store(t *Table) {
-	c.v.Store(t)
+func (c *Cache) Store(table *Table, global *config.GlobalConfig) {
+	if global == nil {
+		global = &config.GlobalConfig{}
+	}
+	c.v.Store(&Snapshot{Table: table, Global: global})
 }
 
 func (t *Table) Scopes() []*config.ScopedConfig {
@@ -189,12 +200,16 @@ func (r *Resolver) Resolve(urlPath string) Decision {
 		return Decision{Kind: KindNotFound}
 	}
 
-	t := r.Cache.Get()
+	snap := r.Cache.Get()
+	t := snap.Table
 
 	if d := r.matchExact(t, urlPath); d.Kind != KindNotFound {
 		return d
 	}
 	if d := r.matchWildcard(t, urlPath); d.Kind != KindNotFound {
+		return d
+	}
+	if d := r.matchGit(snap.Global, urlPath); d.Kind != KindNotFound {
 		return d
 	}
 	if d := r.matchDist(t, urlPath); d.Kind != KindNotFound {
@@ -222,6 +237,14 @@ func (r *Resolver) matchExact(t *Table, urlPath string) Decision {
 		}
 	}
 	return Decision{Kind: KindNotFound}
+}
+
+func (r *Resolver) matchGit(global *config.GlobalConfig, urlPath string) Decision {
+	loc, ok := config.ResolveGitRedirect(global, urlPath)
+	if !ok {
+		return Decision{Kind: KindNotFound}
+	}
+	return Decision{Kind: KindRedirect, Status: http.StatusFound, Location: loc}
 }
 
 func (r *Resolver) matchWildcard(t *Table, urlPath string) Decision {
@@ -340,7 +363,7 @@ func (r *Resolver) matchStatic(urlPath string) Decision {
 	if err != nil || st.IsDir() {
 		return Decision{Kind: KindNotFound}
 	}
-	headers := scopeHeadersForPath(r.Cache.Get(), urlPath)
+	headers := scopeHeadersForPath(r.Cache.Get().Table, urlPath)
 	return Decision{Kind: KindServeFile, AbsPath: abs, Headers: headers, URLPath: urlPath}
 }
 
@@ -356,7 +379,7 @@ func (r *Resolver) matchDirIndex(urlPath string) Decision {
 	for _, name := range []string{"index.html", "index.htm"} {
 		idx := filepath.Join(abs, name)
 		if st, err := os.Stat(idx); err == nil && !st.IsDir() {
-			headers := scopeHeadersForPath(r.Cache.Get(), urlPath)
+			headers := scopeHeadersForPath(r.Cache.Get().Table, urlPath)
 			return Decision{Kind: KindServeFile, AbsPath: idx, Headers: headers, URLPath: urlPath}
 		}
 	}
@@ -376,7 +399,7 @@ func (r *Resolver) matchReadme(urlPath string) Decision {
 	if !found {
 		return Decision{Kind: KindNotFound}
 	}
-	headers := scopeHeadersForPath(r.Cache.Get(), urlPath)
+	headers := scopeHeadersForPath(r.Cache.Get().Table, urlPath)
 	return Decision{
 		Kind:    KindReadme,
 		AbsPath: readmePath,

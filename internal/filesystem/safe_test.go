@@ -52,6 +52,8 @@ func TestBlockedRoutesConfig(t *testing.T) {
 		"/.routes.yml",
 		"/scripts/.routes.yml",
 		"/foo/.routes.yaml",
+		"/.config.yml",
+		"/scripts/.config.yaml",
 	}
 	for _, c := range cases {
 		if !filesystem.IsBlockedPath(c) {

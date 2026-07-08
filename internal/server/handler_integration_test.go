@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/mewisme/mewroute/internal/config"
 	"github.com/mewisme/mewroute/internal/filesystem"
 	"github.com/mewisme/mewroute/internal/router"
 	"github.com/mewisme/mewroute/internal/server"
@@ -24,11 +25,50 @@ func testServer(t *testing.T) *httptest.Server {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cache.Store(table)
+	cache.Store(table, &config.GlobalConfig{})
 	resolver := router.NewResolver(root, cache)
 	files := filesystem.NewServer(root, filesystem.NewStatCache())
 	h := server.NewHandler(resolver, files, slog.Default())
 	return httptest.NewServer(h)
+}
+
+func TestIntegrationGitRedirect(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, config.GlobalConfigFileName), []byte(`git:
+  username: mewisme
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cache := router.NewCache()
+	table, err := router.LoadTable(root, slog.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	global, err := config.LoadGlobalConfig(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cache.Store(table, global)
+	resolver := router.NewResolver(root, cache)
+	files := filesystem.NewServer(root, filesystem.NewStatCache())
+	h := server.NewHandler(resolver, files, slog.Default())
+	ts := httptest.NewServer(h)
+	defer ts.Close()
+
+	client := &http.Client{CheckRedirect: func(req *http.Request, via []*http.Request) error {
+		return http.ErrUseLastResponse
+	}}
+	resp, err := client.Get(ts.URL + "/git/wrec")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 302 {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+	if resp.Header.Get("Location") != "https://github.com/mewisme/wrec" {
+		t.Fatalf("location=%s", resp.Header.Get("Location"))
+	}
 }
 
 func TestIntegrationRewrite(t *testing.T) {

@@ -102,14 +102,37 @@ Requests are resolved in this order:
 
 1. **Exact** configured routes
 2. **Wildcard** configured routes (`*` in `from`)
-3. **Dist** routes (longest URL prefix match)
-4. **Physical file** on disk
-5. **Directory index** (`index.html`, `index.htm`)
-6. **README** (`readme.md`, any case) — auto-rendered as HTML
-7. **Directory listing** (if `listing: true` for the scope)
-8. **404**
+3. **Git** shortcut (`/git` → GitHub redirects when configured in `.config.yml`)
+4. **Dist** routes (longest URL prefix match)
+5. **Physical file** on disk
+6. **Directory index** (`index.html`, `index.htm`)
+7. **README** (`readme.md`, any case) — auto-rendered as HTML
+8. **Directory listing** (if `listing: true` for the scope)
+9. **404**
 
 Each `.routes.yml` applies only to its directory and subdirectories. Child directories may define their own configuration. When multiple scopes match, the **longest URL prefix** wins for headers, listing, and dist.
+
+## `.config.yml` (global)
+
+Place `.config.yml` in the content root (`data/.config.yml`). This file holds global settings and is **not** publicly accessible (always `404`). Copy from [`data/.config.yml.example`](data/.config.yml.example); the live file is gitignored.
+
+### Git shortcut
+
+Redirects to GitHub without any `.routes.yml` entries:
+
+```yaml
+git:
+  username: mewisme   # default GitHub username
+  route: /git         # optional URL prefix (default: /git)
+```
+
+| Request | Redirect |
+|---------|----------|
+| `GET /git` | `https://github.com/mewisme` |
+| `GET /git/wrec` | `https://github.com/mewisme/wrec` |
+| `GET /git/mewisme/wrec` | `https://github.com/mewisme/wrec` |
+
+The git shortcut is inactive when `.config.yml` is missing or `git.username` is empty. Configured `.routes.yml` exact and wildcard routes still take priority over the git matcher.
 
 ## `.routes.yml` reference
 
@@ -249,7 +272,7 @@ If a directory contains `readme.md` (any casing, e.g. `README.md`, `readme.MD`),
 
 - **Read-only mount** recommended (`:ro` in Docker)
 - **Path traversal** blocked via canonical path checks
-- **`.routes.yml`** is never publicly accessible (always `404`)
+- **`.routes.yml`** and **`.config.yml`** are never publicly accessible (always `404`)
 - Files are **never executed** — only served as content
 - Only `GET` and `HEAD` are allowed (`405` otherwise)
 
@@ -265,7 +288,7 @@ GET /healthz → 200 ok
 cmd/mewroute/          Entry point
 internal/
   app/                 Wiring and lifecycle
-  config/              Env + YAML parsing
+  config/              Env + YAML parsing (.routes.yml, .config.yml)
   router/              Route table and resolution
   filesystem/          Safe paths, caching, file serving
   listing/             HTML directory index
@@ -276,7 +299,7 @@ internal/
 
 Caches:
 
-- **Route cache** — atomic snapshot of all `.routes.yml` rules
+- **Route cache** — atomic snapshot of all `.routes.yml` rules and `.config.yml` global settings
 - **Stat cache** — file metadata, invalidated on filesystem changes
 - **Config reload** — debounced via `fsnotify` (no restart required)
 - **Live content updates** — edit files under `data/` on the host while mewroute is running; changes are picked up automatically (new folders are detected every `WATCH_POLL_INTERVAL`)

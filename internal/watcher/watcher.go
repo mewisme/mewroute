@@ -102,7 +102,12 @@ func (r *Reloader) loop(ctx context.Context, w *fsnotify.Watcher) {
 				r.Logger.Error("route reload failed", "error", err, "reason", reason)
 				return
 			}
-			r.RouteCache.Store(table)
+			global, err := config.LoadGlobalConfig(r.Root)
+			if err != nil {
+				r.Logger.Error("global config reload failed", "error", err, "reason", reason)
+				return
+			}
+			r.RouteCache.Store(table, global)
 			r.Logger.Info("routes reloaded", "reason", reason, "paths", changed)
 			return
 		}
@@ -162,7 +167,7 @@ func (r *Reloader) noteChange(path string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.pendingPaths = append(r.pendingPaths, path)
-	if isRoutesFile(path) || isRoutesInPath(path) {
+	if isRoutesFile(path) || isRoutesInPath(path) || isGlobalConfigFile(path) {
 		r.routesDirty = true
 	}
 }
@@ -179,6 +184,12 @@ func (r *Reloader) schedule(flush func(), timer **time.Timer) {
 func isRoutesFile(path string) bool {
 	base := filepath.Base(path)
 	return strings.EqualFold(base, config.RoutesFileName) || strings.EqualFold(base, ".routes.yaml")
+}
+
+func isGlobalConfigFile(path string) bool {
+	base := filepath.Base(path)
+	return strings.EqualFold(base, config.GlobalConfigFileName) ||
+		strings.EqualFold(base, ".config.yaml")
 }
 
 func isRoutesInPath(path string) bool {

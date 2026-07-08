@@ -35,7 +35,7 @@ func newResolver(t *testing.T, root string) *router.Resolver {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cache.Store(table)
+	cache.Store(table, &config.GlobalConfig{})
 	return router.NewResolver(root, cache)
 }
 
@@ -164,10 +164,73 @@ func TestRootAnchoredTarget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cache.Store(table)
+	cache.Store(table, &config.GlobalConfig{})
 	resolver := router.NewResolver(root, cache)
 	d := resolver.Resolve("/fetch")
 	if d.Kind != router.KindServeFile || filepath.Base(d.AbsPath) != "hello.ps1" {
 		t.Fatalf("unexpected: %+v", d)
+	}
+}
+
+func newResolverWithGlobal(t *testing.T, root string, global *config.GlobalConfig) *router.Resolver {
+	t.Helper()
+	cache := router.NewCache()
+	table, err := router.LoadTable(root, slog.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	cache.Store(table, global)
+	return router.NewResolver(root, cache)
+}
+
+func TestGitRouteDefaultUsername(t *testing.T) {
+	root := t.TempDir()
+	global := &config.GlobalConfig{Git: config.GitSettings{Username: "mewisme"}}
+	r := newResolverWithGlobal(t, root, global)
+
+	d := r.Resolve("/git/wrec")
+	if d.Kind != router.KindRedirect || d.Location != "https://github.com/mewisme/wrec" {
+		t.Fatalf("unexpected: %+v", d)
+	}
+	if d.Status != 302 {
+		t.Fatalf("status=%d", d.Status)
+	}
+}
+
+func TestGitRouteExplicitUsername(t *testing.T) {
+	root := t.TempDir()
+	global := &config.GlobalConfig{Git: config.GitSettings{Username: "mewisme"}}
+	r := newResolverWithGlobal(t, root, global)
+
+	d := r.Resolve("/git/mewisme/wrec")
+	if d.Kind != router.KindRedirect || d.Location != "https://github.com/mewisme/wrec" {
+		t.Fatalf("unexpected: %+v", d)
+	}
+}
+
+func TestGitRouteProfile(t *testing.T) {
+	root := t.TempDir()
+	global := &config.GlobalConfig{Git: config.GitSettings{Username: "mewisme"}}
+	r := newResolverWithGlobal(t, root, global)
+
+	d := r.Resolve("/git")
+	if d.Kind != router.KindRedirect || d.Location != "https://github.com/mewisme" {
+		t.Fatalf("unexpected: %+v", d)
+	}
+}
+
+func TestGitRouteInactiveWithoutConfig(t *testing.T) {
+	r := newResolver(t, testRoot(t))
+	d := r.Resolve("/git/wrec")
+	if d.Kind != router.KindNotFound {
+		t.Fatalf("expected not found, got %+v", d)
+	}
+}
+
+func TestBlockedGlobalConfigPath(t *testing.T) {
+	r := newResolver(t, testRoot(t))
+	d := r.Resolve("/.config.yml")
+	if d.Kind != router.KindNotFound {
+		t.Fatalf("expected not found")
 	}
 }

@@ -8,15 +8,18 @@ import (
 )
 
 const (
-	ConfigFileName  = ".routes.yml"
-	ConfigFileName2 = ".routes.yaml"
+	ConfigFileName        = ".routes.yml"
+	ConfigFileName2       = ".routes.yaml"
+	GlobalConfigFileName  = ".config.yml"
+	GlobalConfigFileName2 = ".config.yaml"
 )
 
 func IsBlockedPath(urlPath string) bool {
 	clean := path.Clean("/" + strings.TrimPrefix(urlPath, "/"))
 	parts := strings.Split(strings.Trim(clean, "/"), "/")
 	for _, p := range parts {
-		if p == ConfigFileName || p == ConfigFileName2 {
+		if p == ConfigFileName || p == ConfigFileName2 ||
+			p == GlobalConfigFileName || p == GlobalConfigFileName2 {
 			return true
 		}
 	}
