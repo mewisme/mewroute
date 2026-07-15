@@ -3,6 +3,7 @@
 *.exe
 *.test
 coverage.out
+dist/
 .idea/
 .vscode/
 .cursor/

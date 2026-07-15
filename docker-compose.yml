@@ -1,6 +1,5 @@
 services:
   mewroute:
-    build: .
     image: ghcr.io/mewisme/mewroute:latest
     ports:
       - "8080:8080"

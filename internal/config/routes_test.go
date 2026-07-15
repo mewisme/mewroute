@@ -50,6 +50,50 @@ func TestLoadScopedConfigInvalidRedirect(t *testing.T) {
 	}
 }
 
+func TestLoadScopedConfigRejectsConfigFileRoutes(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, config.RoutesFileName), []byte("routes: []\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, config.GlobalConfigFileName), []byte("git:\n  username: x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cases := []string{
+		`routes:
+  - from: /.routes.yml
+    to: /ok
+    type: redirect
+    status: 302
+`,
+		`routes:
+  - from: /leak
+    to: ./.routes.yml
+    type: file
+`,
+		`routes:
+  - from: /leak
+    to: /.config.yml
+    type: rewrite
+`,
+		`routes:
+  - from: /leak
+    to: /.routes.yml
+    type: redirect
+    status: 302
+`,
+	}
+	for i, content := range cases {
+		path := filepath.Join(root, config.RoutesFileName)
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := config.LoadScopedConfig(root, root); err == nil {
+			t.Fatalf("case %d: expected error rejecting config file route", i)
+		}
+	}
+}
+
 func TestResolveTargetPathRootAnchored(t *testing.T) {
 	root := t.TempDir()
 	scripts := filepath.Join(root, "scripts")

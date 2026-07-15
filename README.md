@@ -1,6 +1,6 @@
 # mewroute
 
-[![CI](https://github.com/mewisme/mewroute/actions/workflows/ci.yml/badge.svg)](https://github.com/mewisme/mewroute/actions/workflows/ci.yml)
+[![Release](https://github.com/mewisme/mewroute/actions/workflows/release.yml/badge.svg)](https://github.com/mewisme/mewroute/actions/workflows/release.yml) [![GitHub release](https://img.shields.io/github/v/release/mewisme/mewroute?display_name=tag&logo=github)](https://github.com/mewisme/mewroute/releases/latest) [![Go](https://img.shields.io/github/go-mod/go-version/mewisme/mewroute?logo=go)](go.mod) [![Docker Image](https://img.shields.io/docker/v/mewisme/mewroute?logo=docker&label=docker%20hub&sort=semver)](https://hub.docker.com/r/mewisme/mewroute) [![GHCR](https://img.shields.io/badge/ghcr.io-mewisme%2Fmewroute-blue?logo=github)](https://github.com/mewisme/mewroute/pkgs/container/mewroute) [![License](https://img.shields.io/github/license/mewisme/mewroute)](LICENSE)
 
 **mewroute** is a lightweight, configurable static file router written in Go. It serves files from a mounted directory over HTTP with per-folder routing rules, rewrites, redirects, and SPA-style `dist` fallbacks.
 
@@ -36,10 +36,10 @@ flowchart LR
 ```bash
 git clone https://github.com/mewisme/mewroute.git
 cd mewroute
-docker compose up --build
+docker compose up -d
 ```
 
-Open [http://localhost:8080/app/](http://localhost:8080/app/) for the demo SPA, or [http://localhost:8080/scripts/hello](http://localhost:8080/scripts/hello) for a rewrite example.
+Pulls `ghcr.io/mewisme/mewroute:latest`. Open [http://localhost:8080/app/](http://localhost:8080/app/) for the demo SPA, or [http://localhost:8080/scripts/hello](http://localhost:8080/scripts/hello) for a rewrite example.
 
 Mount your own content by replacing the `./data` volume in `docker-compose.yml`:
 
@@ -51,21 +51,18 @@ volumes:
 ### Docker
 
 ```bash
-docker build -t mewroute .
-docker run --rm -p 8080:8080 -v "$(pwd)/data:/data:ro" mewroute
-```
-
-Published images (`ghcr.io/mewisme/mewroute`) are **multi-arch manifests** (`linux/amd64`, `linux/arm64`). Tags like `latest`, `1.0.0`, or `v1.0.0` auto-select the correct architecture on pull.
-
-Releases are published by pushing a semver tag (`v1.0.0`) or running the [Docker publish workflow](.github/workflows/docker-publish.yml) manually.
-
-```bash
 docker pull ghcr.io/mewisme/mewroute:latest
+# or: docker pull mewisme/mewroute:latest
+docker run --rm -p 8080:8080 -v "$(pwd)/data:/data:ro" ghcr.io/mewisme/mewroute:latest
 ```
+
+Published images (GHCR + Docker Hub) are **multi-arch manifests** (`linux/amd64`, `linux/arm64`). Tags like `latest` or `1.0.0` auto-select the correct architecture on pull.
+
+Releases are published by [GoReleaser](.goreleaser.yaml) when you push a semver tag (`v1.0.0`): GitHub Release binaries plus images to `ghcr.io/mewisme/mewroute` and `mewisme/mewroute` ([Release workflow](.github/workflows/release.yml)). The [Dockerfile](Dockerfile) only copies the prebuilt binary (`$TARGETPLATFORM/mewroute`).
 
 ### Binary
 
-Requires **Go 1.26+** to build:
+Download from [GitHub Releases](https://github.com/mewisme/mewroute/releases), or build with **Go 1.26+**:
 
 ```bash
 go build -o mewroute ./cmd/mewroute

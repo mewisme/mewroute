@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/mewisme/mewroute/internal/filesystem"
 	"gopkg.in/yaml.v3"
 )
 
@@ -130,22 +131,37 @@ func validateRoute(r RouteDef, contentRoot, dirPath string) error {
 	if strings.TrimSpace(r.To) == "" {
 		return fmt.Errorf("to is required")
 	}
+	if filesystem.IsBlockedPath(NormalizeFromPath(r.From)) {
+		return fmt.Errorf("cannot map config file as route from")
+	}
 	switch r.Type {
 	case RouteRewrite, RouteFile:
-		if _, err := ResolveTargetPath(contentRoot, dirPath, r.To); err != nil {
+		abs, err := ResolveTargetPath(contentRoot, dirPath, r.To)
+		if err != nil {
 			return fmt.Errorf("to: %w", err)
+		}
+		if filesystem.IsBlockedAbsPath(abs) {
+			return fmt.Errorf("cannot map config file as route target")
 		}
 	case RouteRedirect:
 		if r.Status != 0 && !allowedRedirectStatus[r.Status] {
 			return fmt.Errorf("invalid redirect status %d", r.Status)
 		}
-		if _, err := NormalizeRedirectTarget(r.To); err != nil {
+		loc, err := NormalizeRedirectTarget(r.To)
+		if err != nil {
 			return fmt.Errorf("to: %w", err)
+		}
+		if isSameSiteRedirect(loc) && filesystem.IsBlockedPath(loc) {
+			return fmt.Errorf("cannot redirect to config file")
 		}
 	default:
 		return fmt.Errorf("invalid type %q", r.Type)
 	}
 	return nil
+}
+
+func isSameSiteRedirect(loc string) bool {
+	return !strings.Contains(loc, "://") && !strings.HasPrefix(loc, "//")
 }
 
 // NormalizeRedirectTarget validates and normalizes redirect targets.

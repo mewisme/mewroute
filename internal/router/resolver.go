@@ -284,6 +284,9 @@ func (r *Resolver) decisionFromRoute(cr compiledRoute, urlPath string) Decision 
 		if err != nil {
 			return Decision{Kind: KindNotFound}
 		}
+		if !strings.Contains(loc, "://") && !strings.HasPrefix(loc, "//") && filesystem.IsBlockedPath(loc) {
+			return Decision{Kind: KindNotFound}
+		}
 		status := route.Status
 		if status == 0 {
 			status = http.StatusFound
@@ -291,13 +294,13 @@ func (r *Resolver) decisionFromRoute(cr compiledRoute, urlPath string) Decision 
 		return Decision{Kind: KindRedirect, Status: status, Location: loc, Headers: headers}
 	case config.RouteRewrite:
 		abs, err := config.ResolveTargetPath(r.Root, cr.scope.DirPath, route.To)
-		if err != nil {
+		if err != nil || filesystem.IsBlockedAbsPath(abs) {
 			return Decision{Kind: KindNotFound}
 		}
 		return Decision{Kind: KindServeFile, AbsPath: abs, Headers: headers, URLPath: urlPath}
 	case config.RouteFile:
 		abs, err := config.ResolveTargetPath(r.Root, cr.scope.DirPath, route.To)
-		if err != nil {
+		if err != nil || filesystem.IsBlockedAbsPath(abs) {
 			return Decision{Kind: KindNotFound}
 		}
 		return Decision{Kind: KindServeFile, AbsPath: abs, Download: route.Download, Headers: headers, URLPath: urlPath}

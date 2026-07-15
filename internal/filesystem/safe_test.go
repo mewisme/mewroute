@@ -54,11 +54,21 @@ func TestBlockedRoutesConfig(t *testing.T) {
 		"/foo/.routes.yaml",
 		"/.config.yml",
 		"/scripts/.config.yaml",
+		"/.ROUTES.YML",
 	}
 	for _, c := range cases {
 		if !filesystem.IsBlockedPath(c) {
 			t.Fatalf("expected blocked: %s", c)
 		}
+	}
+	if !filesystem.IsBlockedFileName(".routes.yml") {
+		t.Fatal("expected blocked filename")
+	}
+	if !filesystem.IsBlockedAbsPath(filepath.Join("data", "scripts", ".routes.yml")) {
+		t.Fatal("expected blocked abs path")
+	}
+	if filesystem.IsBlockedFileName("hello.ps1") {
+		t.Fatal("hello.ps1 should not be blocked")
 	}
 }
 

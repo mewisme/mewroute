@@ -14,12 +14,28 @@ const (
 	GlobalConfigFileName2 = ".config.yaml"
 )
 
+// IsBlockedFileName reports whether base is a mewroute config file that must
+// never be served or mapped as a route (.routes.yml in any folder, .config.yml).
+func IsBlockedFileName(base string) bool {
+	switch strings.ToLower(base) {
+	case ConfigFileName, ConfigFileName2, GlobalConfigFileName, GlobalConfigFileName2:
+		return true
+	default:
+		return false
+	}
+}
+
+// IsBlockedAbsPath reports whether an absolute filesystem path points at a
+// blocked config file (by basename).
+func IsBlockedAbsPath(abs string) bool {
+	return IsBlockedFileName(filepath.Base(abs))
+}
+
 func IsBlockedPath(urlPath string) bool {
 	clean := path.Clean("/" + strings.TrimPrefix(urlPath, "/"))
 	parts := strings.Split(strings.Trim(clean, "/"), "/")
 	for _, p := range parts {
-		if p == ConfigFileName || p == ConfigFileName2 ||
-			p == GlobalConfigFileName || p == GlobalConfigFileName2 {
+		if IsBlockedFileName(p) {
 			return true
 		}
 	}
