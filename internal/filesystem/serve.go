@@ -41,14 +41,14 @@ func (s *Server) Stat(absPath string) (os.FileInfo, error) {
 			return &cachedInfo{path: absPath, meta: meta}, nil
 		}
 	}
-	st, err := os.Stat(absPath)
+	stat, err := os.Stat(absPath)
 	if err != nil {
 		return nil, err
 	}
 	if s.Cache != nil {
-		s.Cache.Set(absPath, MetaFromStat(st))
+		s.Cache.Set(absPath, MetaFromStat(stat))
 	}
-	return st, nil
+	return stat, nil
 }
 
 type cachedInfo struct {
@@ -65,49 +65,47 @@ func (c *cachedInfo) Sys() any           { return nil }
 
 func ContentType(name string) string {
 	ext := strings.ToLower(filepath.Ext(name))
-	if ct, ok := mimeOverrides[ext]; ok {
-		return ct
+	if contentType, ok := mimeOverrides[ext]; ok {
+		return contentType
 	}
-	ct := mime.TypeByExtension(ext)
-	if ct == "" {
+	contentType := mime.TypeByExtension(ext)
+	if contentType == "" {
 		return "application/octet-stream"
 	}
-	return ct
+	return contentType
 }
 
 func ApplyHeaders(w http.ResponseWriter, headers map[string]string) {
-	for k, v := range headers {
-		w.Header().Set(k, v)
+	for key, value := range headers {
+		w.Header().Set(key, value)
 	}
 }
 
 func ServeFile(w http.ResponseWriter, r *http.Request, absPath string, download bool) error {
-	st, err := os.Stat(absPath)
+	stat, err := os.Stat(absPath)
 	if err != nil {
 		return err
 	}
-	if st.IsDir() {
+	if stat.IsDir() {
 		return fmt.Errorf("is directory")
 	}
 
-	f, err := os.Open(absPath)
+	file, err := os.Open(absPath)
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer file.Close()
 
 	if download {
-		name := filepath.Base(absPath)
-		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", name))
+		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filepath.Base(absPath)))
 	}
-
 	if w.Header().Get("Cache-Control") == "" {
 		w.Header().Set("Cache-Control", "no-cache, must-revalidate")
 	}
-
-	etag := fmt.Sprintf(`"%x-%x"`, st.ModTime().Unix(), st.Size())
-	w.Header().Set("ETag", etag)
-
-	http.ServeContent(w, r, filepath.Base(absPath), st.ModTime(), f)
+	if w.Header().Get("Content-Type") == "" {
+		w.Header().Set("Content-Type", ContentType(absPath))
+	}
+	w.Header().Set("ETag", fmt.Sprintf(`"%x-%x"`, stat.ModTime().Unix(), stat.Size()))
+	http.ServeContent(w, r, filepath.Base(absPath), stat.ModTime(), file)
 	return nil
 }

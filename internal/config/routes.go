@@ -31,11 +31,12 @@ const (
 )
 
 type RouteDef struct {
-	From     string    `yaml:"from"`
-	To       string    `yaml:"to"`
-	Type     RouteType `yaml:"type"`
-	Status   int       `yaml:"status"`
-	Download bool      `yaml:"download"`
+	From     string               `yaml:"from"`
+	To       string               `yaml:"to"`
+	Type     RouteType            `yaml:"type"`
+	Status   int                  `yaml:"status"`
+	Download bool                 `yaml:"download"`
+	Params   map[string]ParamRule `yaml:"params"`
 }
 
 type DistDef struct {
@@ -70,30 +71,25 @@ func ParseRoutesFile(data []byte) (RoutesFile, error) {
 func LoadScopedConfig(contentRoot, dirPath string) (ScopedConfig, error) {
 	dirPath = filepath.Clean(dirPath)
 	contentRoot = filepath.Clean(contentRoot)
-	path := filepath.Join(dirPath, RoutesFileName)
-	data, err := os.ReadFile(path)
+	configPath := filepath.Join(dirPath, RoutesFileName)
+	data, err := os.ReadFile(configPath)
 	if err != nil {
 		return ScopedConfig{}, err
 	}
 
 	rf, err := ParseRoutesFile(data)
 	if err != nil {
-		return ScopedConfig{}, fmt.Errorf("%s: %w", path, err)
+		return ScopedConfig{}, fmt.Errorf("%s: %w", configPath, err)
 	}
 
-	sc := ScopedConfig{
-		DirPath: dirPath,
-		Headers: copyHeaders(rf.Headers),
-		Listing: false,
-	}
-
+	sc := ScopedConfig{DirPath: dirPath, Headers: copyHeaders(rf.Headers)}
 	if rf.Listing != nil {
 		sc.Listing = *rf.Listing
 	}
 
 	for i, route := range rf.Routes {
 		if err := validateRoute(route, contentRoot, dirPath); err != nil {
-			return ScopedConfig{}, fmt.Errorf("%s route[%d]: %w", path, i, err)
+			return ScopedConfig{}, fmt.Errorf("%s route[%d]: %w", configPath, i, err)
 		}
 		sc.Routes = append(sc.Routes, route)
 	}
@@ -101,42 +97,49 @@ func LoadScopedConfig(contentRoot, dirPath string) (ScopedConfig, error) {
 	if rf.Dist != nil {
 		dist := *rf.Dist
 		if dist.Path == "" {
-			return ScopedConfig{}, fmt.Errorf("%s: dist.path is required", path)
+			return ScopedConfig{}, fmt.Errorf("%s: dist.path is required", configPath)
 		}
 		absDist, err := ResolveTargetPath(contentRoot, dirPath, dist.Path)
 		if err != nil {
-			return ScopedConfig{}, fmt.Errorf("%s dist: %w", path, err)
+			return ScopedConfig{}, fmt.Errorf("%s dist: %w", configPath, err)
 		}
 		if st, err := os.Stat(absDist); err != nil || !st.IsDir() {
-			return ScopedConfig{}, fmt.Errorf("%s dist: path %q does not exist or is not a directory", path, dist.Path)
+			return ScopedConfig{}, fmt.Errorf("%s dist: path %q does not exist or is not a directory", configPath, dist.Path)
 		}
 		dist.Path = absDist
 		if dist.Fallback != "" {
-			fb, err := ResolveTargetPath(contentRoot, absDist, dist.Fallback)
+			fallback, err := ResolveTargetPath(contentRoot, absDist, dist.Fallback)
 			if err != nil {
-				return ScopedConfig{}, fmt.Errorf("%s dist fallback: %w", path, err)
+				return ScopedConfig{}, fmt.Errorf("%s dist fallback: %w", configPath, err)
 			}
-			dist.Fallback = fb
+			dist.Fallback = fallback
 		}
 		sc.Dist = &dist
 	}
-
 	return sc, nil
 }
 
-func validateRoute(r RouteDef, contentRoot, dirPath string) error {
-	if strings.TrimSpace(r.From) == "" {
+func validateRoute(route RouteDef, contentRoot, dirPath string) error {
+	if strings.TrimSpace(route.From) == "" {
 		return fmt.Errorf("from is required")
 	}
-	if strings.TrimSpace(r.To) == "" {
+	if strings.TrimSpace(route.To) == "" {
 		return fmt.Errorf("to is required")
 	}
-	if filesystem.IsBlockedPath(NormalizeFromPath(r.From)) {
+	if err := ValidateRouteParams(route); err != nil {
+		return err
+	}
+	if filesystem.IsBlockedPath(NormalizeFromPath(route.From)) {
 		return fmt.Errorf("cannot map config file as route from")
 	}
-	switch r.Type {
+
+	dynamicTarget := strings.Contains(route.To, "{")
+	switch route.Type {
 	case RouteRewrite, RouteFile:
-		abs, err := ResolveTargetPath(contentRoot, dirPath, r.To)
+		if dynamicTarget {
+			return nil
+		}
+		abs, err := ResolveTargetPath(contentRoot, dirPath, route.To)
 		if err != nil {
 			return fmt.Errorf("to: %w", err)
 		}
@@ -144,35 +147,34 @@ func validateRoute(r RouteDef, contentRoot, dirPath string) error {
 			return fmt.Errorf("cannot map config file as route target")
 		}
 	case RouteRedirect:
-		if r.Status != 0 && !allowedRedirectStatus[r.Status] {
-			return fmt.Errorf("invalid redirect status %d", r.Status)
+		if route.Status != 0 && !allowedRedirectStatus[route.Status] {
+			return fmt.Errorf("invalid redirect status %d", route.Status)
 		}
-		loc, err := NormalizeRedirectTarget(r.To)
+		if dynamicTarget {
+			return nil
+		}
+		location, err := NormalizeRedirectTarget(route.To)
 		if err != nil {
 			return fmt.Errorf("to: %w", err)
 		}
-		if isSameSiteRedirect(loc) && filesystem.IsBlockedPath(loc) {
+		if isSameSiteRedirect(location) && filesystem.IsBlockedPath(location) {
 			return fmt.Errorf("cannot redirect to config file")
 		}
 	default:
-		return fmt.Errorf("invalid type %q", r.Type)
+		return fmt.Errorf("invalid type %q", route.Type)
 	}
 	return nil
 }
 
-func isSameSiteRedirect(loc string) bool {
-	return !strings.Contains(loc, "://") && !strings.HasPrefix(loc, "//")
+func isSameSiteRedirect(location string) bool {
+	return !strings.Contains(location, "://") && !strings.HasPrefix(location, "//")
 }
 
-// NormalizeRedirectTarget validates and normalizes redirect targets.
-// Supports same-site paths (/foo), relative paths (foo), and external URLs
-// (http://, https://, or protocol-relative //host/path).
 func NormalizeRedirectTarget(to string) (string, error) {
 	to = strings.TrimSpace(to)
 	if to == "" {
 		return "", fmt.Errorf("empty redirect target")
 	}
-
 	switch {
 	case strings.Contains(to, "://"):
 		u, err := url.Parse(to)
@@ -186,14 +188,12 @@ func NormalizeRedirectTarget(to string) (string, error) {
 			return "", fmt.Errorf("invalid redirect URL: missing host")
 		}
 		return u.String(), nil
-
 	case strings.HasPrefix(to, "//"):
 		u, err := url.Parse("https:" + to)
 		if err != nil || u.Host == "" {
 			return "", fmt.Errorf("invalid protocol-relative redirect URL")
 		}
 		return to, nil
-
 	case strings.HasPrefix(to, "/"):
 		if strings.Contains(to, "..") {
 			return "", fmt.Errorf("path traversal not allowed")
@@ -203,7 +203,6 @@ func NormalizeRedirectTarget(to string) (string, error) {
 			return "/", nil
 		}
 		return clean, nil
-
 	default:
 		if strings.Contains(to, ":") {
 			return "", fmt.Errorf("unsupported redirect target")
@@ -212,9 +211,6 @@ func NormalizeRedirectTarget(to string) (string, error) {
 	}
 }
 
-// ResolveTargetPath resolves a route target path.
-// Relative paths are resolved from the config directory.
-// Paths starting with "/" are resolved from the content root (ROOT_DIR).
 func ResolveTargetPath(contentRoot, configDir, to string) (string, error) {
 	to = strings.TrimSpace(to)
 	if strings.HasPrefix(to, "/") {
@@ -267,13 +263,13 @@ func resolveLocalPath(base, rel string) (string, error) {
 	return joined, nil
 }
 
-func copyHeaders(h map[string]string) map[string]string {
-	if len(h) == 0 {
+func copyHeaders(headers map[string]string) map[string]string {
+	if len(headers) == 0 {
 		return nil
 	}
-	out := make(map[string]string, len(h))
-	for k, v := range h {
-		out[k] = v
+	out := make(map[string]string, len(headers))
+	for key, value := range headers {
+		out[key] = value
 	}
 	return out
 }
@@ -286,18 +282,18 @@ func NormalizeFromPath(from string) string {
 	return pathClean(from)
 }
 
-func pathClean(p string) string {
-	if p == "" || p == "/" {
+func pathClean(value string) string {
+	if value == "" || value == "/" {
 		return "/"
 	}
-	p = strings.TrimSuffix(p, "/")
-	if p == "" {
+	value = strings.TrimSuffix(value, "/")
+	if value == "" {
 		return "/"
 	}
-	if !strings.HasPrefix(p, "/") {
-		p = "/" + p
+	if !strings.HasPrefix(value, "/") {
+		value = "/" + value
 	}
-	return p
+	return value
 }
 
 func JoinURLPrefix(prefix, from string) string {

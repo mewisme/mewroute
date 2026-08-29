@@ -7,6 +7,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"sync/atomic"
@@ -39,13 +40,13 @@ type Decision struct {
 }
 
 type compiledRoute struct {
-	scopeLen   int
-	scope      *config.ScopedConfig
-	route      config.RouteDef
-	matchPath  string
-	wildcard   bool
-	pattern    string
-	prefixPart string
+	scopeLen  int
+	scope     *config.ScopedConfig
+	route     config.RouteDef
+	matchPath string
+	pattern   string
+	paramRE   *regexp.Regexp
+	paramKeys []string
 }
 
 type distEntry struct {
@@ -55,6 +56,7 @@ type distEntry struct {
 
 type Table struct {
 	exact    []compiledRoute
+	param    []compiledRoute
 	wildcard []compiledRoute
 	dist     []distEntry
 	scopes   []*config.ScopedConfig
@@ -67,16 +69,13 @@ type Snapshot struct {
 }
 
 type Cache struct {
-	v atomic.Value // *Snapshot
+	v atomic.Value
 }
 
 func NewCache() *Cache {
-	c := &Cache{}
-	c.v.Store(&Snapshot{
-		Table:  &Table{byPrefix: map[string]*config.ScopedConfig{}},
-		Global: &config.GlobalConfig{},
-	})
-	return c
+	cache := &Cache{}
+	cache.v.Store(&Snapshot{Table: &Table{byPrefix: map[string]*config.ScopedConfig{}}, Global: &config.GlobalConfig{}})
+	return cache
 }
 
 func (c *Cache) Get() *Snapshot {
@@ -94,24 +93,46 @@ func (t *Table) Scopes() []*config.ScopedConfig {
 	return t.scopes
 }
 
+func compileParamPattern(pattern string) (*regexp.Regexp, []string, error) {
+	names, err := config.RouteParamNames(pattern)
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(names) == 0 {
+		return nil, nil, nil
+	}
+	var builder strings.Builder
+	builder.WriteString("^")
+	cursor := 0
+	re := regexp.MustCompile(`\{([A-Za-z][A-Za-z0-9_-]*)\}`)
+	for _, loc := range re.FindAllStringSubmatchIndex(pattern, -1) {
+		builder.WriteString(regexp.QuoteMeta(pattern[cursor:loc[0]]))
+		builder.WriteString("([^/]+)")
+		cursor = loc[1]
+	}
+	builder.WriteString(regexp.QuoteMeta(pattern[cursor:]))
+	builder.WriteString("$")
+	compiled, err := regexp.Compile(builder.String())
+	if err != nil {
+		return nil, nil, err
+	}
+	return compiled, names, nil
+}
+
 func LoadTable(root string, logger *slog.Logger) (*Table, error) {
 	var scopes []*config.ScopedConfig
-
-	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+	err := filepath.WalkDir(root, func(filePath string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		if d.IsDir() {
+		if entry.IsDir() || entry.Name() != config.RoutesFileName {
 			return nil
 		}
-		if d.Name() != config.RoutesFileName {
-			return nil
-		}
-		dir := filepath.Dir(p)
-		sc, err := config.LoadScopedConfig(root, dir)
+		dir := filepath.Dir(filePath)
+		scoped, err := config.LoadScopedConfig(root, dir)
 		if err != nil {
 			if logger != nil {
-				logger.Warn("skipping invalid routes config", "path", p, "error", err)
+				logger.Warn("skipping invalid routes config", "path", filePath, "error", err)
 			}
 			return nil
 		}
@@ -120,69 +141,71 @@ func LoadTable(root string, logger *slog.Logger) (*Table, error) {
 			return err
 		}
 		if rel == "." {
-			sc.URLPrefix = ""
+			scoped.URLPrefix = ""
 		} else {
-			sc.URLPrefix = "/" + filepath.ToSlash(rel)
+			scoped.URLPrefix = "/" + filepath.ToSlash(rel)
 		}
-		scopes = append(scopes, &sc)
+		scopes = append(scopes, &scoped)
 		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
 
-	t := &Table{byPrefix: make(map[string]*config.ScopedConfig)}
-	for _, sc := range scopes {
-		t.byPrefix[sc.URLPrefix] = sc
-		for _, r := range sc.Routes {
-			cr := compiledRoute{
-				scopeLen:  len(sc.URLPrefix),
-				scope:     sc,
-				route:     r,
-				matchPath: config.JoinURLPrefix(sc.URLPrefix, r.From),
+	table := &Table{byPrefix: make(map[string]*config.ScopedConfig)}
+	for _, scoped := range scopes {
+		table.byPrefix[scoped.URLPrefix] = scoped
+		for _, route := range scoped.Routes {
+			compiled := compiledRoute{
+				scopeLen:  len(scoped.URLPrefix),
+				scope:     scoped,
+				route:     route,
+				matchPath: config.JoinURLPrefix(scoped.URLPrefix, route.From),
 			}
-			if strings.Contains(r.From, "*") {
-				cr.wildcard = true
-				cr.pattern = cr.matchPath
-				if idx := strings.Index(cr.matchPath, "*"); idx >= 0 {
-					cr.prefixPart = cr.matchPath[:idx]
-				}
-				t.wildcard = append(t.wildcard, cr)
+			paramRE, paramKeys, err := compileParamPattern(compiled.matchPath)
+			if err != nil {
+				return nil, err
+			}
+			if paramRE != nil {
+				compiled.paramRE = paramRE
+				compiled.paramKeys = paramKeys
+				table.param = append(table.param, compiled)
+			} else if strings.Contains(route.From, "*") {
+				compiled.pattern = compiled.matchPath
+				table.wildcard = append(table.wildcard, compiled)
 			} else {
-				t.exact = append(t.exact, cr)
+				table.exact = append(table.exact, compiled)
 			}
 		}
-		if sc.Dist != nil {
-			t.dist = append(t.dist, distEntry{scopeLen: len(sc.URLPrefix), scope: sc})
+		if scoped.Dist != nil {
+			table.dist = append(table.dist, distEntry{scopeLen: len(scoped.URLPrefix), scope: scoped})
 		}
-		t.scopes = append(t.scopes, sc)
+		table.scopes = append(table.scopes, scoped)
 	}
 
-	sort.Slice(t.exact, func(i, j int) bool {
-		if t.exact[i].scopeLen != t.exact[j].scopeLen {
-			return t.exact[i].scopeLen > t.exact[j].scopeLen
-		}
-		return len(t.exact[i].matchPath) > len(t.exact[j].matchPath)
-	})
-	sort.Slice(t.wildcard, func(i, j int) bool {
-		if t.wildcard[i].scopeLen != t.wildcard[j].scopeLen {
-			return t.wildcard[i].scopeLen > t.wildcard[j].scopeLen
-		}
-		return len(t.wildcard[i].matchPath) > len(t.wildcard[j].matchPath)
-	})
-	sort.Slice(t.dist, func(i, j int) bool {
-		return t.dist[i].scopeLen > t.dist[j].scopeLen
-	})
+	sortCompiled := func(routes []compiledRoute) {
+		sort.Slice(routes, func(i, j int) bool {
+			if routes[i].scopeLen != routes[j].scopeLen {
+				return routes[i].scopeLen > routes[j].scopeLen
+			}
+			return len(routes[i].matchPath) > len(routes[j].matchPath)
+		})
+	}
+	sortCompiled(table.exact)
+	sortCompiled(table.param)
+	sortCompiled(table.wildcard)
+	sort.Slice(table.dist, func(i, j int) bool { return table.dist[i].scopeLen > table.dist[j].scopeLen })
 
 	if logger != nil {
 		logger.Info("route table loaded",
 			"scopes", len(scopes),
-			"exact_routes", len(t.exact),
-			"wildcard_routes", len(t.wildcard),
-			"dist_routes", len(t.dist),
+			"exact_routes", len(table.exact),
+			"param_routes", len(table.param),
+			"wildcard_routes", len(table.wildcard),
+			"dist_routes", len(table.dist),
 		)
 	}
-	return t, nil
+	return table, nil
 }
 
 type Resolver struct {
@@ -199,58 +222,82 @@ func (r *Resolver) Resolve(urlPath string) Decision {
 	if filesystem.IsBlockedPath(urlPath) {
 		return Decision{Kind: KindNotFound}
 	}
-
-	snap := r.Cache.Get()
-	t := snap.Table
-
-	if d := r.matchExact(t, urlPath); d.Kind != KindNotFound {
-		return d
+	snapshot := r.Cache.Get()
+	table := snapshot.Table
+	if decision := r.matchExact(table, snapshot.Global, urlPath); decision.Kind != KindNotFound {
+		return decision
 	}
-	if d := r.matchWildcard(t, urlPath); d.Kind != KindNotFound {
-		return d
+	if decision := r.matchParam(table, snapshot.Global, urlPath); decision.Kind != KindNotFound {
+		return decision
 	}
-	if d := r.matchGit(snap.Global, urlPath); d.Kind != KindNotFound {
-		return d
+	if decision := r.matchWildcard(table, snapshot.Global, urlPath); decision.Kind != KindNotFound {
+		return decision
 	}
-	if d := r.matchDist(t, urlPath); d.Kind != KindNotFound {
-		return d
+	if decision := r.matchGit(snapshot.Global, urlPath); decision.Kind != KindNotFound {
+		return decision
 	}
-	if d := r.matchStatic(urlPath); d.Kind != KindNotFound {
-		return d
+	if decision := r.matchDist(table, urlPath); decision.Kind != KindNotFound {
+		return decision
 	}
-	if d := r.matchDirIndex(urlPath); d.Kind != KindNotFound {
-		return d
+	if decision := r.matchStatic(urlPath); decision.Kind != KindNotFound {
+		return decision
 	}
-	if d := r.matchReadme(urlPath); d.Kind != KindNotFound {
-		return d
+	if decision := r.matchDirIndex(urlPath); decision.Kind != KindNotFound {
+		return decision
 	}
-	if d := r.matchListing(t, urlPath); d.Kind != KindNotFound {
-		return d
+	if decision := r.matchReadme(urlPath); decision.Kind != KindNotFound {
+		return decision
+	}
+	if decision := r.matchListing(table, urlPath); decision.Kind != KindNotFound {
+		return decision
 	}
 	return Decision{Kind: KindNotFound}
 }
 
-func (r *Resolver) matchExact(t *Table, urlPath string) Decision {
-	for _, cr := range t.exact {
-		if cr.matchPath == urlPath {
-			return r.decisionFromRoute(cr, urlPath)
+func (r *Resolver) matchExact(table *Table, global *config.GlobalConfig, urlPath string) Decision {
+	for _, route := range table.exact {
+		if route.matchPath == urlPath {
+			return r.decisionFromRoute(route, global, urlPath, nil)
+		}
+	}
+	return Decision{Kind: KindNotFound}
+}
+
+func (r *Resolver) matchParam(table *Table, global *config.GlobalConfig, urlPath string) Decision {
+	for _, route := range table.param {
+		matches := route.paramRE.FindStringSubmatch(urlPath)
+		if matches == nil {
+			continue
+		}
+		params := make(map[string]string, len(route.paramKeys))
+		allowed := true
+		for i, key := range route.paramKeys {
+			value := matches[i+1]
+			if !config.ParamAllowed(route.route.Params[key], value) {
+				allowed = false
+				break
+			}
+			params[key] = value
+		}
+		if allowed {
+			return r.decisionFromRoute(route, global, urlPath, params)
 		}
 	}
 	return Decision{Kind: KindNotFound}
 }
 
 func (r *Resolver) matchGit(global *config.GlobalConfig, urlPath string) Decision {
-	loc, ok := config.ResolveGitRedirect(global, urlPath)
+	location, ok := config.ResolveGitRedirect(global, urlPath)
 	if !ok {
 		return Decision{Kind: KindNotFound}
 	}
-	return Decision{Kind: KindRedirect, Status: http.StatusFound, Location: loc}
+	return Decision{Kind: KindRedirect, Status: http.StatusFound, Location: location}
 }
 
-func (r *Resolver) matchWildcard(t *Table, urlPath string) Decision {
-	for _, cr := range t.wildcard {
-		if wildcardMatch(cr.pattern, urlPath) {
-			return r.decisionFromRoute(cr, urlPath)
+func (r *Resolver) matchWildcard(table *Table, global *config.GlobalConfig, urlPath string) Decision {
+	for _, route := range table.wildcard {
+		if wildcardMatch(route.pattern, urlPath) {
+			return r.decisionFromRoute(route, global, urlPath, nil)
 		}
 	}
 	return Decision{Kind: KindNotFound}
@@ -262,95 +309,83 @@ func wildcardMatch(pattern, urlPath string) bool {
 	}
 	if strings.HasSuffix(pattern, "/*") {
 		prefix := strings.TrimSuffix(pattern, "/*")
-		if urlPath == prefix {
-			return true
-		}
-		return strings.HasPrefix(urlPath, prefix+"/")
+		return urlPath == prefix || strings.HasPrefix(urlPath, prefix+"/")
 	}
 	parts := strings.Split(pattern, "*")
-	if len(parts) == 2 {
-		return strings.HasPrefix(urlPath, parts[0]) && strings.HasSuffix(urlPath, parts[1])
-	}
-	return false
+	return len(parts) == 2 && strings.HasPrefix(urlPath, parts[0]) && strings.HasSuffix(urlPath, parts[1])
 }
 
-func (r *Resolver) decisionFromRoute(cr compiledRoute, urlPath string) Decision {
-	route := cr.route
-	headers := copyHeaders(cr.scope.Headers)
+func (r *Resolver) decisionFromRoute(compiled compiledRoute, global *config.GlobalConfig, urlPath string, params map[string]string) Decision {
+	route := compiled.route
+	headers := copyHeaders(compiled.scope.Headers)
+	target, err := config.InterpolateTarget(route.To, params, global)
+	if err != nil {
+		return Decision{Kind: KindNotFound}
+	}
 
 	switch route.Type {
 	case config.RouteRedirect:
-		loc, err := config.NormalizeRedirectTarget(route.To)
+		location, err := config.NormalizeRedirectTarget(target)
 		if err != nil {
 			return Decision{Kind: KindNotFound}
 		}
-		if !strings.Contains(loc, "://") && !strings.HasPrefix(loc, "//") && filesystem.IsBlockedPath(loc) {
+		if !strings.Contains(location, "://") && !strings.HasPrefix(location, "//") && filesystem.IsBlockedPath(location) {
 			return Decision{Kind: KindNotFound}
 		}
 		status := route.Status
 		if status == 0 {
 			status = http.StatusFound
 		}
-		return Decision{Kind: KindRedirect, Status: status, Location: loc, Headers: headers}
-	case config.RouteRewrite:
-		abs, err := config.ResolveTargetPath(r.Root, cr.scope.DirPath, route.To)
+		return Decision{Kind: KindRedirect, Status: status, Location: location, Headers: headers}
+	case config.RouteRewrite, config.RouteFile:
+		abs, err := config.ResolveTargetPath(r.Root, compiled.scope.DirPath, target)
 		if err != nil || filesystem.IsBlockedAbsPath(abs) {
 			return Decision{Kind: KindNotFound}
 		}
-		return Decision{Kind: KindServeFile, AbsPath: abs, Headers: headers, URLPath: urlPath}
-	case config.RouteFile:
-		abs, err := config.ResolveTargetPath(r.Root, cr.scope.DirPath, route.To)
-		if err != nil || filesystem.IsBlockedAbsPath(abs) {
-			return Decision{Kind: KindNotFound}
+		return Decision{
+			Kind:     KindServeFile,
+			AbsPath:  abs,
+			Download: route.Type == config.RouteFile && route.Download,
+			Headers:  headers,
+			URLPath:  urlPath,
 		}
-		return Decision{Kind: KindServeFile, AbsPath: abs, Download: route.Download, Headers: headers, URLPath: urlPath}
 	default:
 		return Decision{Kind: KindNotFound}
 	}
 }
 
-func (r *Resolver) matchDist(t *Table, urlPath string) Decision {
-	for _, de := range t.dist {
-		sc := de.scope
-		prefix := sc.URLPrefix
-		if prefix == "" {
-			// dist at root applies to all paths only if explicitly at root - skip unless url matches root subtree
-			prefix = ""
-		}
-
+func (r *Resolver) matchDist(table *Table, urlPath string) Decision {
+	for _, entry := range table.dist {
+		scoped := entry.scope
+		prefix := scoped.URLPrefix
 		if prefix != "" {
 			trimmed := strings.TrimSuffix(prefix, "/")
 			if urlPath != trimmed && urlPath != prefix && !strings.HasPrefix(urlPath, prefix+"/") {
 				continue
 			}
 		}
-
 		var suffix string
 		if prefix == "" {
 			suffix = strings.TrimPrefix(urlPath, "/")
 		} else {
-			suffix = strings.TrimPrefix(urlPath, prefix)
-			suffix = strings.TrimPrefix(suffix, "/")
+			suffix = strings.TrimPrefix(strings.TrimPrefix(urlPath, prefix), "/")
 		}
-
 		var target string
 		if suffix == "" {
-			if sc.Dist.Fallback != "" {
-				target = sc.Dist.Fallback
+			if scoped.Dist.Fallback != "" {
+				target = scoped.Dist.Fallback
 			} else {
-				target = filepath.Join(sc.Dist.Path, "index.html")
+				target = filepath.Join(scoped.Dist.Path, "index.html")
 			}
 		} else {
-			target = filepath.Join(sc.Dist.Path, filepath.FromSlash(suffix))
+			target = filepath.Join(scoped.Dist.Path, filepath.FromSlash(suffix))
 		}
-
-		if st, err := os.Stat(target); err == nil && !st.IsDir() {
-			return Decision{Kind: KindServeFile, AbsPath: target, Headers: copyHeaders(sc.Headers), URLPath: urlPath}
+		if stat, err := os.Stat(target); err == nil && !stat.IsDir() {
+			return Decision{Kind: KindServeFile, AbsPath: target, Headers: copyHeaders(scoped.Headers), URLPath: urlPath}
 		}
-
-		if sc.Dist.Fallback != "" {
-			if st, err := os.Stat(sc.Dist.Fallback); err == nil && !st.IsDir() {
-				return Decision{Kind: KindServeFile, AbsPath: sc.Dist.Fallback, Headers: copyHeaders(sc.Headers), URLPath: urlPath}
+		if scoped.Dist.Fallback != "" {
+			if stat, err := os.Stat(scoped.Dist.Fallback); err == nil && !stat.IsDir() {
+				return Decision{Kind: KindServeFile, AbsPath: scoped.Dist.Fallback, Headers: copyHeaders(scoped.Headers), URLPath: urlPath}
 			}
 		}
 	}
@@ -362,12 +397,11 @@ func (r *Resolver) matchStatic(urlPath string) Decision {
 	if !ok {
 		return Decision{Kind: KindNotFound}
 	}
-	st, err := os.Stat(abs)
-	if err != nil || st.IsDir() {
+	stat, err := os.Stat(abs)
+	if err != nil || stat.IsDir() {
 		return Decision{Kind: KindNotFound}
 	}
-	headers := scopeHeadersForPath(r.Cache.Get().Table, urlPath)
-	return Decision{Kind: KindServeFile, AbsPath: abs, Headers: headers, URLPath: urlPath}
+	return Decision{Kind: KindServeFile, AbsPath: abs, Headers: scopeHeadersForPath(r.Cache.Get().Table, urlPath), URLPath: urlPath}
 }
 
 func (r *Resolver) matchDirIndex(urlPath string) Decision {
@@ -375,15 +409,14 @@ func (r *Resolver) matchDirIndex(urlPath string) Decision {
 	if !ok {
 		return Decision{Kind: KindNotFound}
 	}
-	st, err := os.Stat(abs)
-	if err != nil || !st.IsDir() {
+	stat, err := os.Stat(abs)
+	if err != nil || !stat.IsDir() {
 		return Decision{Kind: KindNotFound}
 	}
 	for _, name := range []string{"index.html", "index.htm"} {
-		idx := filepath.Join(abs, name)
-		if st, err := os.Stat(idx); err == nil && !st.IsDir() {
-			headers := scopeHeadersForPath(r.Cache.Get().Table, urlPath)
-			return Decision{Kind: KindServeFile, AbsPath: idx, Headers: headers, URLPath: urlPath}
+		indexPath := filepath.Join(abs, name)
+		if stat, err := os.Stat(indexPath); err == nil && !stat.IsDir() {
+			return Decision{Kind: KindServeFile, AbsPath: indexPath, Headers: scopeHeadersForPath(r.Cache.Get().Table, urlPath), URLPath: urlPath}
 		}
 	}
 	return Decision{Kind: KindNotFound}
@@ -394,78 +427,66 @@ func (r *Resolver) matchReadme(urlPath string) Decision {
 	if !ok {
 		return Decision{Kind: KindNotFound}
 	}
-	st, err := os.Stat(abs)
-	if err != nil || !st.IsDir() {
+	stat, err := os.Stat(abs)
+	if err != nil || !stat.IsDir() {
 		return Decision{Kind: KindNotFound}
 	}
 	readmePath, found := markdown.FindReadme(abs)
 	if !found {
 		return Decision{Kind: KindNotFound}
 	}
-	headers := scopeHeadersForPath(r.Cache.Get().Table, urlPath)
-	return Decision{
-		Kind:    KindReadme,
-		AbsPath: readmePath,
-		Headers: headers,
-		URLPath: urlPath,
-	}
+	return Decision{Kind: KindReadme, AbsPath: readmePath, Headers: scopeHeadersForPath(r.Cache.Get().Table, urlPath), URLPath: urlPath}
 }
 
-func (r *Resolver) matchListing(t *Table, urlPath string) Decision {
+func (r *Resolver) matchListing(table *Table, urlPath string) Decision {
 	abs, _, ok := filesystem.Resolve(r.Root, urlPath)
 	if !ok {
 		return Decision{Kind: KindNotFound}
 	}
-	st, err := os.Stat(abs)
-	if err != nil || !st.IsDir() {
+	stat, err := os.Stat(abs)
+	if err != nil || !stat.IsDir() {
 		return Decision{Kind: KindNotFound}
 	}
-
-	sc := longestListingScope(t, urlPath)
-	if sc == nil || !sc.Listing {
+	scoped := longestListingScope(table, urlPath)
+	if scoped == nil || !scoped.Listing {
 		return Decision{Kind: KindNotFound}
 	}
-	return Decision{
-		Kind:       KindListing,
-		ListingDir: abs,
-		Headers:    copyHeaders(sc.Headers),
-		URLPath:    urlPath,
-	}
+	return Decision{Kind: KindListing, ListingDir: abs, Headers: copyHeaders(scoped.Headers), URLPath: urlPath}
 }
 
-func longestListingScope(t *Table, urlPath string) *config.ScopedConfig {
+func longestListingScope(table *Table, urlPath string) *config.ScopedConfig {
 	var best *config.ScopedConfig
 	bestLen := -1
-	for _, sc := range t.scopes {
-		if !sc.Listing {
+	for _, scoped := range table.scopes {
+		if !scoped.Listing {
 			continue
 		}
-		prefix := sc.URLPrefix
+		prefix := scoped.URLPrefix
 		if prefix == "" {
 			prefix = "/"
 		}
 		if pathUnderPrefix(urlPath, prefix) || urlPath == strings.TrimSuffix(prefix, "/") {
-			if len(sc.URLPrefix) > bestLen {
-				best = sc
-				bestLen = len(sc.URLPrefix)
+			if len(scoped.URLPrefix) > bestLen {
+				best = scoped
+				bestLen = len(scoped.URLPrefix)
 			}
 		}
 	}
 	return best
 }
 
-func scopeHeadersForPath(t *Table, urlPath string) map[string]string {
+func scopeHeadersForPath(table *Table, urlPath string) map[string]string {
 	var best *config.ScopedConfig
 	bestLen := -1
-	for _, sc := range t.scopes {
-		prefix := sc.URLPrefix
+	for _, scoped := range table.scopes {
+		prefix := scoped.URLPrefix
 		if prefix == "" {
 			prefix = "/"
 		}
 		if pathUnderPrefix(urlPath, prefix) || urlPath == strings.TrimSuffix(prefix, "/") {
-			if len(sc.URLPrefix) > bestLen {
-				best = sc
-				bestLen = len(sc.URLPrefix)
+			if len(scoped.URLPrefix) > bestLen {
+				best = scoped
+				bestLen = len(scoped.URLPrefix)
 			}
 		}
 	}
@@ -480,33 +501,30 @@ func pathUnderPrefix(urlPath, prefix string) bool {
 		return true
 	}
 	prefix = strings.TrimSuffix(prefix, "/")
-	if urlPath == prefix {
-		return true
-	}
-	return strings.HasPrefix(urlPath, prefix+"/")
+	return urlPath == prefix || strings.HasPrefix(urlPath, prefix+"/")
 }
 
-func normalizeURLPath(p string) string {
-	if p == "" {
+func normalizeURLPath(value string) string {
+	if value == "" {
 		return "/"
 	}
-	if !strings.HasPrefix(p, "/") {
-		p = "/" + p
+	if !strings.HasPrefix(value, "/") {
+		value = "/" + value
 	}
-	clean := path.Clean(p)
+	clean := path.Clean(value)
 	if clean == "." {
 		return "/"
 	}
 	return clean
 }
 
-func copyHeaders(h map[string]string) map[string]string {
-	if len(h) == 0 {
+func copyHeaders(headers map[string]string) map[string]string {
+	if len(headers) == 0 {
 		return nil
 	}
-	out := make(map[string]string, len(h))
-	for k, v := range h {
-		out[k] = v
+	out := make(map[string]string, len(headers))
+	for key, value := range headers {
+		out[key] = value
 	}
 	return out
 }
