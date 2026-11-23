@@ -8,19 +8,19 @@ Same `.routes.yml` / `.config.yml` format as the Go server (which stays unchange
 Data dir: `--data <path>` > `MEWROUTE_DATA` > `../data`.
 
 ```sh
-npm install
-npm test
-MEWROUTE_DATA=/path/to/data npm run dev   # http://localhost:8787
+pnpm install
+pnpm test
+MEWROUTE_DATA=/path/to/data pnpm dev   # http://localhost:8787
 ```
 
 ## Deploy
 
-One-time: `npx wrangler kv namespace create MANIFEST`, then put the returned `id` in `wrangler.jsonc` (`kv_namespaces[0].id`).
+One-time: `pnpm wrangler kv namespace create MANIFEST`, then put the returned `id` in `wrangler.jsonc` (`kv_namespaces[0].id`).
 
 | Command | Use |
 |---|---|
-| `npm run deploy` | Full deploy: assets + code, then manifest and `assets-hash` to KV. Needed when files change. |
-| `npm run sync-config` | Config-only: pushes the manifest to KV without redeploying. Refuses if any file changed since the last deploy. Live after KV propagation (~60 s) plus the 30 s isolate cache. |
+| `pnpm deploy` | Full deploy: assets + code, then manifest and `assets-hash` to KV. Needed when files change. |
+| `pnpm sync-config` | Config-only: pushes the manifest to KV without redeploying. Refuses if any file changed since the last deploy. Live after KV propagation (~60 s) plus the 30 s isolate cache. |
 
 ## Differences from the Go server
 

@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { build, resolveDataDir, WORKER_DIR } from "./build.js";
 
 const wrangler = (args: string[], capture = false): string =>
-  execFileSync("npx", ["wrangler", ...args], {
+  execFileSync("pnpm", ["exec", "wrangler", ...args], {
     cwd: WORKER_DIR,
     shell: true,
     stdio: capture ? ["inherit", "pipe", "inherit"] : "inherit",
@@ -22,7 +22,7 @@ if (configOnly) {
     /* missing key: treated as mismatch */
   }
   if (remote !== m.assetsHash) {
-    console.error("files changed since last deploy; run npm run deploy");
+    console.error("files changed since last deploy; run pnpm run deploy");
     process.exit(1);
   }
   putManifest();
