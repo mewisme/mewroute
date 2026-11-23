@@ -9,5 +9,5 @@
     "html_handling": "none",
     "not_found_handling": "none"
   },
-  "kv_namespaces": [{ "binding": "MANIFEST" }]
+  "kv_namespaces": [{ "binding": "MANIFEST", "id": "d22372b5955f42689c49c29ec727ad3c" }]
 }
