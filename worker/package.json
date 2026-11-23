@@ -1,0 +1,13 @@
+{
+  "name": "mewroute-worker",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsx build/build.ts",
+    "dev": "tsx build/build.ts && wrangler kv key put manifest --path=.mewroute/manifest.json --binding=MANIFEST --local && wrangler dev",
+    "deploy": "tsx build/deploy.ts",
+    "sync-config": "tsx build/deploy.ts --config-only",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  }
+}
