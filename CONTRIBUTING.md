@@ -6,6 +6,7 @@ Thank you for your interest in contributing!
 
 - **Go 1.26+**
 - Docker (optional, for container workflows)
+- Node.js and **pnpm** (only for the Cloudflare Workers target in `worker/`)
 
 ## Development setup
 
@@ -22,12 +23,23 @@ Set `ROOT_DIR` to point at `testdata/` or `data/` for local testing:
 ROOT_DIR=./data PORT=8080 go run ./cmd/mewroute
 ```
 
+### Worker
+
+```bash
+cd worker
+pnpm install
+pnpm typecheck
+pnpm test
+```
+
+Routing behavior must stay in sync between Go (`internal/router`, `internal/config`) and TypeScript (`worker/src/resolve.ts`): when changing routing semantics, update both and add the case to both test suites.
+
 ## Pull request checklist
 
 1. Fork the repository and create a feature branch
 2. Run `gofmt -w .` on changed Go files
 3. Add or update tests for behavior changes
-4. Ensure `go test ./...` and `go vet ./...` pass
+4. Ensure `go test ./...` and `go vet ./...` pass (and `pnpm typecheck && pnpm test` in `worker/` if you touched it)
 5. Update `CHANGELOG.md` under **Unreleased** when appropriate
 6. Open a pull request with a clear description and test plan
 
