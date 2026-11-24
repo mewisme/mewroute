@@ -50,7 +50,40 @@ async function serveFile(
   if (d.download) {
     h.set("Content-Disposition", `attachment; filename="${d.path.slice(d.path.lastIndexOf("/") + 1)}"`);
   }
-  return new Response(asset.body, { status: asset.status, statusText: asset.statusText, headers: h });
+  if (asset.status !== 200 || request.method !== "GET") return new Response(asset.body, { status: asset.status, statusText: asset.statusText, headers: h });
+  h.set("Accept-Ranges", "bytes");
+  const rangeHeader = request.headers.get("Range");
+  if (!rangeHeader) return new Response(asset.body, { status: 200, headers: h });
+  // Assets ignore Range, so slice here. ponytail: buffers the whole file (assets are <=25 MiB); no multi-range, If-Range ignored.
+  const buf = await asset.arrayBuffer();
+  const r = parseRange(rangeHeader, buf.byteLength);
+  if (r === null) return new Response(buf, { status: 200, headers: h });
+  if (r === "invalid") {
+    h.set("Content-Range", `bytes */${buf.byteLength}`);
+    return new Response(null, { status: 416, headers: h });
+  }
+  h.set("Content-Range", `bytes ${r.start}-${r.end}/${buf.byteLength}`);
+  h.delete("Content-Length");
+  return new Response(buf.slice(r.start, r.end + 1), { status: 206, headers: h });
+}
+
+/** null: ignore header (serve full); "invalid": 416. Single `bytes=` range only. */
+export function parseRange(header: string, size: number): { start: number; end: number } | "invalid" | null {
+  const m = /^bytes=(\d*)-(\d*)$/.exec(header.trim());
+  if (!m || (m[1] === "" && m[2] === "")) return null;
+  let start: number;
+  let end: number;
+  if (m[1] === "") {
+    const n = Number(m[2]);
+    if (n === 0) return "invalid";
+    start = Math.max(0, size - n);
+    end = size - 1;
+  } else {
+    start = Number(m[1]);
+    end = m[2] === "" ? size - 1 : Math.min(Number(m[2]), size - 1);
+  }
+  if (start >= size || start > end) return "invalid";
+  return { start, end };
 }
 
 export async function handleRequest(

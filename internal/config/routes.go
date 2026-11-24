@@ -195,7 +195,7 @@ func NormalizeRedirectTarget(to string) (string, error) {
 		}
 		return to, nil
 	case strings.HasPrefix(to, "/"):
-		if strings.Contains(to, "..") {
+		if hasDotDotSegment(to) {
 			return "", fmt.Errorf("path traversal not allowed")
 		}
 		clean := path.Clean(to)
@@ -211,19 +211,39 @@ func NormalizeRedirectTarget(to string) (string, error) {
 	}
 }
 
+// hasDotDotSegment reports whether s has a ".." path segment ("a..b" is fine).
+func hasDotDotSegment(s string) bool {
+	for _, seg := range strings.FieldsFunc(s, func(r rune) bool { return r == '/' || r == '\\' }) {
+		if seg == ".." {
+			return true
+		}
+	}
+	return false
+}
+
 func ResolveTargetPath(contentRoot, configDir, to string) (string, error) {
 	to = strings.TrimSpace(to)
-	if strings.HasPrefix(to, "/") {
-		return resolveRootPath(contentRoot, to)
-	}
-	if filepath.IsAbs(to) {
+	var abs string
+	var err error
+	switch {
+	case strings.HasPrefix(to, "/"):
+		abs, err = resolveRootPath(contentRoot, to)
+	case filepath.IsAbs(to):
 		return "", fmt.Errorf("absolute filesystem paths not allowed: %s", to)
+	default:
+		abs, err = resolveLocalPath(configDir, to)
 	}
-	return resolveLocalPath(configDir, to)
+	if err != nil {
+		return "", err
+	}
+	if !filesystem.WithinRoot(contentRoot, abs) {
+		return "", fmt.Errorf("path escapes content root via symlink")
+	}
+	return abs, nil
 }
 
 func resolveRootPath(contentRoot, urlPath string) (string, error) {
-	if strings.Contains(urlPath, "..") {
+	if hasDotDotSegment(urlPath) {
 		return "", fmt.Errorf("path traversal not allowed")
 	}
 	clean := path.Clean(urlPath)

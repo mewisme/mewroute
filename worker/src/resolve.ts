@@ -112,7 +112,7 @@ export function pathUnderPrefix(urlPath: string, prefix: string): boolean {
 export function resolveTargetPath(scopeDir: string, to: string): string {
   to = to.trim();
   if (to.startsWith("/")) {
-    if (to.includes("..")) throw new Error("path traversal not allowed");
+    if (to.split(/[\\/]/).includes("..")) throw new Error("path traversal not allowed");
     const clean = cleanPath(to);
     if (clean === "/") throw new Error("invalid root path");
     return clean;
@@ -154,7 +154,7 @@ export function normalizeRedirectTarget(to: string): string {
     return to;
   }
   if (to.startsWith("/")) {
-    if (to.includes("..")) throw new Error("path traversal not allowed");
+    if (to.split(/[\\/]/).includes("..")) throw new Error("path traversal not allowed");
     const clean = cleanPath(to);
     return clean === "." ? "/" : clean;
   }

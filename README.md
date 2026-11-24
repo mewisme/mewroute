@@ -11,6 +11,15 @@ It ships as two deployment targets that share the same data format (`.routes.yml
 | **Go server / Docker** | `cmd/`, `internal/`, [Dockerfile](Dockerfile) | Long-running process, live filesystem, hot reload |
 | **Cloudflare Workers** | [`worker/`](worker/README.md) | TypeScript port; files as Static Assets, routes in KV |
 
+| Feature | Go server | Worker |
+|---|---|---|
+| Hot reload | yes (fsnotify + polling) | no (redeploy) |
+| `Range` requests | yes | single range, buffered |
+| Directory listing / README render | yes | yes (built at deploy) |
+| Symlinks | served only if inside root | never published |
+| Invalid config | logged and skipped | fails the build |
+| Health check | `/healthz` | `/healthz` |
+
 **Security model:** mewroute never executes files. Scripts (`.sh`, `.ps1`, `.bat`, `.js`, etc.) are always returned as static content.
 
 ```mermaid
@@ -49,7 +58,7 @@ cd mewroute
 docker compose up -d
 ```
 
-Pulls `ghcr.io/mewisme/mewroute:latest`. Open [http://localhost:8080/app/](http://localhost:8080/app/) for the demo SPA, or [http://localhost:8080/scripts/hello](http://localhost:8080/scripts/hello) for a rewrite example.
+Pulls `ghcr.io/mewisme/mewroute:0.0.6`. Open [http://localhost:8080/app/](http://localhost:8080/app/) for the demo SPA, or [http://localhost:8080/scripts/hello](http://localhost:8080/scripts/hello) for a rewrite example.
 
 Mount your own content by replacing the `./data` volume in `docker-compose.yml`:
 
@@ -327,7 +336,7 @@ If a directory contains `readme.md` (any casing, e.g. `README.md`, `readme.MD`),
 ## Security
 
 - **Read-only mount** recommended (`:ro` in Docker)
-- **Path traversal** blocked via canonical path checks
+- **Path traversal** blocked via canonical path checks; symlinks that resolve outside `ROOT_DIR` are never served (`404`)
 - **`.routes.yml`** and **`.config.yml`** are never publicly accessible (always `404`)
 - Files are **never executed** — only served as content
 - Only `GET` and `HEAD` are allowed (`405` otherwise)

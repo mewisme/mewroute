@@ -10,6 +10,11 @@ const wrangler = (args: string[], capture = false): string =>
   }) ?? "";
 
 const configOnly = process.argv.includes("--config-only");
+// Deploying overwrites the live manifest: never fall back silently to the sample ../data.
+if (!process.argv.includes("--data") && !process.env.MEWROUTE_DATA && !process.argv.includes("--sample")) {
+  console.error("set MEWROUTE_DATA (or --data <path>) to deploy; pass --sample to deploy the bundled sample data");
+  process.exit(1);
+}
 const m = await build(resolveDataDir(process.argv.slice(2)), WORKER_DIR);
 const putManifest = () =>
   wrangler(["kv", "key", "put", "manifest", "--path=.mewroute/manifest.json", "--binding=MANIFEST", "--remote"]);

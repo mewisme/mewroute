@@ -1,0 +1,16 @@
+[
+  {"path": "/scripts/hello", "kind": "file", "file": "/scripts/hello.ps1"},
+  {"path": "/scripts/old", "kind": "redirect", "location": "/scripts/hello", "status": 302},
+  {"path": "/scripts/external", "kind": "redirect", "location": "https://example.com/docs", "status": 301},
+  {"path": "/app/users/1", "kind": "file", "file": "/app/build/index.html"},
+  {"path": "/app/assets/main.js", "kind": "file", "file": "/app/build/assets/main.js"},
+  {"path": "/nested/child/secret", "kind": "file", "file": "/nested/child/nested.txt"},
+  {"path": "/tools/linux/setup.sh", "kind": "file", "file": "/tools/linux/setup.sh"},
+  {"path": "/scripts/docs/readme", "kind": "file"},
+  {"path": "/scripts/.routes.yml", "kind": "notFound"},
+  {"path": "/.config.yml", "kind": "notFound"},
+  {"path": "/scripts/%2e%2e/.routes.yml", "kind": "notFound"},
+  {"path": "/does/not/exist", "kind": "notFound"},
+  {"path": "/scripts", "kind": "listing"},
+  {"path": "/", "kind": "readme"}
+]

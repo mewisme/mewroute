@@ -78,7 +78,42 @@ func Resolve(root, urlPath string) (absPath, relPath string, ok bool) {
 		}
 	}
 
+	if !WithinRoot(root, absPath) {
+		return "", "", false
+	}
+
 	return absPath, relPath, true
+}
+
+// WithinRoot reports whether abs, after resolving symlinks, stays inside root.
+// The deepest existing ancestor is resolved, so a missing leaf behind an
+// escaping symlink is rejected too.
+// ponytail: one EvalSymlinks per lookup; cache by mtime if this shows up in profiles.
+func WithinRoot(root, abs string) bool {
+	existing, tail := abs, ""
+	var realAbs string
+	for {
+		real, err := filepath.EvalSymlinks(existing)
+		if err == nil {
+			realAbs = filepath.Join(real, tail)
+			break
+		}
+		parent := filepath.Dir(existing)
+		if parent == existing {
+			return false
+		}
+		tail = filepath.Join(filepath.Base(existing), tail)
+		existing = parent
+	}
+	realRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return false
+	}
+	rel, err := filepath.Rel(realRoot, realAbs)
+	if err != nil {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 func URLPathFromRel(rel string) string {

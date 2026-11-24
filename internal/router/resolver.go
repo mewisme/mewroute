@@ -380,7 +380,7 @@ func (r *Resolver) matchDist(table *Table, urlPath string) Decision {
 		} else {
 			target = filepath.Join(scoped.Dist.Path, filepath.FromSlash(suffix))
 		}
-		if stat, err := os.Stat(target); err == nil && !stat.IsDir() {
+		if stat, err := os.Stat(target); err == nil && !stat.IsDir() && filesystem.WithinRoot(r.Root, target) {
 			return Decision{Kind: KindServeFile, AbsPath: target, Headers: copyHeaders(scoped.Headers), URLPath: urlPath}
 		}
 		if scoped.Dist.Fallback != "" {
